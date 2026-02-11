@@ -15,8 +15,12 @@
 
 #include "Arduino.h"
 #include "Arduino_BHY2Host.h"
+#include <ArduinoIoTCloud.h>
+#include <Arduino_ConnectionHandler.h>
+#include <ArduinoMDNS.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiUdp.h>
 
 
 // Set DEBUG to true in order to enable debug print.
@@ -24,6 +28,8 @@
 // Se BAUD rates.
 #define BAUD_RATE_SERIAL_DEBUG  (115200 * 8)
 #define BAUD_RATE_SERIAL_DATA   (115200 * 8)
+#define NAME_TO_RESOLVE "portenta.local"
+
 
 // Network SSID (name).
 char ssid[] = SECRET_SSID;
@@ -35,6 +41,10 @@ WiFiClient client;
 
 // WiFi server.
 WiFiServer server(80);
+
+// mDNS
+WiFiUDP udp;
+MDNS mdns(udp);
 
 // Nicla Sense ME sensors.
 Sensor sensorTemp(SENSOR_ID_TEMP);
@@ -62,6 +72,31 @@ void connectWiFi() {
         delay(10000);
     }
     Serial.println("Connected to WiFi");
+
+    // Initialize the mDNS library. You can now reach or ping this
+    // Arduino via the host name "arduino.local", provided that your operating
+    // system is mDNS/Bonjour-enabled (such as macOS).
+    // Always call this before any other method!
+    mdns.begin(WiFi.localIP(), "arduino");
+
+    // Now let's register the service we're offering (a web service) via Bonjour!
+    // To do so, we call the addServiceRecord() method. The first argument is the
+    // name of our service instance and its type, separated by a dot. In this
+    // case, the service type is _http. There are many other service types, use
+    // Google to look up some common ones, but you can also invent your own
+    // service type, like _mycoolservice - As long as your clients know what to
+    // look for, you're good to go.
+    // The second argument is the port on which the service is running. This is
+    // port 80 here, the standard HTTP port.
+    // The last argument is the protocol type of the service, either TCP or UDP.
+    // Of course, our service is a TCP service.
+    // With the service registered, it will show up in a mDNS/Bonjour-enabled web
+    // browser. As an example, if you are using Apple's Safari, you will now see
+    // the service under Bookmarks -> Bonjour (Provided that you have enabled
+    // Bonjour in the "Bookmarks" preferences in Safari).
+    mdns.addServiceRecord("Arduino mDNS Webserver Example._http",
+                          80,
+                          MDNSServiceTCP);
 }
 
 void printWiFiStatus() {
@@ -101,6 +136,7 @@ void setup() {
 
     // connect to Arduino IoT Cloud:
     ArduinoCloud.begin(ArduinoIoTPreferredConnection);
+    ArduinoCloud.printDebugInfo();
     Serial.println("Connecting to the Arduino IoT Cloud");
     while (ArduinoCloud.connected() != 1) {
       ArduinoCloud.update();
@@ -109,7 +145,7 @@ void setup() {
     delay(1500);
 
     // initilize Nicla Sense ME:
-    BHY2Host.begin(NICLA_VIA_BLE, NICLA_VIA_BLE);
+    BHY2Host.begin(NICLA_VIA_ESLOV, NICLA_VIA_ESLOV);
     sensorTemp.begin();
     sensorHum.begin();
     sensorBaro.begin();
@@ -121,12 +157,16 @@ void setup() {
 }
 
 void loop() {
+  // This actually runs the mDNS module. YOU HAVE TO CALL THIS PERIODICALLY,
+  // OR NOTHING WILL WORK! Preferably, call it once per loop().
+  mdns.run();
+
   static auto lastCheck = millis();
   BHY2Host.update();
 
   // Check sensor values repeatedly.  
 
-  if (millis() - lastCheck >= 5000) {
+  if (millis() - lastCheck >= 10000) {
     lastCheck = millis();
     temperature = 1.0095 * sensorTemp.value() - 4.8051;
     humidity = 1.4383 * sensorHum.value() - 2.5628;
@@ -139,61 +179,62 @@ void loop() {
     Serial.println("H" + String(humidity));
     Serial.println("P" + String(pressure));
   }
-//  WiFiClient client = server.available();   // listen for incoming clients
-//  if (client) {                             // if you get a client,
-//    Serial.println("new client");           // print a message out the serial port
-//    String currentLine = "";                // make a String to hold incoming data from the client
-//
-//    while (client.connected()) {            // loop while the client's connected
-//
-//      if (client.available()) {             // if there's bytes to read from the client,
-//        char c = client.read();             // read a byte, then
-//        Serial.write(c);                    // print it out the serial monitor
-//        if (c == '\n') {                    // if the byte is a newline character
-//
-//          // if the current line is blank, you got two newline characters in a row.
-//          // that's the end of the client HTTP request, so send a response:
-//          if (currentLine.length() == 0) {
-//            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-//            // and a content-type so the client knows what's coming, then a blank line:
-//            client.println("HTTP/1.1 200 OK");
-//            client.println("Content-type:text/html");
-//            client.println();
-//
-//            // the content of the HTTP response follows the header:
-//            client.print("<html><head>");
-//            client.print("<style>");
-//            client.print("* { font-family: sans-serif;}");
-//            client.print("body { padding: 2em; font-size: 2em; text-align: center;}");
-//            client.print("#red{color:red;} #green{color:green;} #blue{color:blue;}");
-//            client.print("</style></head>");
-//            client.print("<body><h1> AMBIENTE </h1>");
-//            client.print("<h2><span id=\"red\">Temperature</span></h2>");
-//            client.print(temperature, 1);
-//            client.print("<h2><span id=\"red\">Humidity</span></h2>");
-//            client.print(humidity, 1);
-//            client.print("<h2><span id=\"red\">Pressure</span></h2>");
-//            client.print(pressure);
-//            client.print("<h2><span id=\"red\">Gas</span></h2>");
-//            client.print(gas);
-//            client.print("<h2><span id=\"red\">BSEC</span></h2>");
-//            client.print(sensorBsec.toString());
-//            client.print("</body></html>");
-//
-//            // The HTTP response ends with another blank line:
-//            client.println();
-//            // break out of the while loop:
-//            break;
-//          } else {      // if you got a newline, then clear currentLine:
-//            currentLine = "";
-//          }
-//        } else if (c != '\r') {    // if you got anything else but a carriage return character,
-//          currentLine += c;      // add it to the end of the currentLine
-//        }
-//      }
-//    }
-//    // close the connection:
-//    client.stop();
-//    Serial.println("client disconnected");
-//  }
+
+  WiFiClient client = server.available();   // listen for incoming clients
+  if (client) {                             // if you get a client,
+    Serial.println("new client");           // print a message out the serial port
+    String currentLine = "";                // make a String to hold incoming data from the client
+
+    while (client.connected()) {            // loop while the client's connected
+
+      if (client.available()) {             // if there's bytes to read from the client,
+        char c = client.read();             // read a byte, then
+        Serial.write(c);                    // print it out the serial monitor
+        if (c == '\n') {                    // if the byte is a newline character
+
+          // if the current line is blank, you got two newline characters in a row.
+          // that's the end of the client HTTP request, so send a response:
+          if (currentLine.length() == 0) {
+            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
+            // and a content-type so the client knows what's coming, then a blank line:
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println();
+
+            // Send the HTML Content
+            client.println("<!DOCTYPE html><html>");
+            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+            client.println("<style>body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #121212; color: white; padding-top: 50px; }");
+            client.println(".card { background: #1e1e1e; padding: 30px; border-radius: 20px; display: inline-block; box-shadow: 0 10px 20px rgba(0,0,0,0.5); border: 1px solid #333; }");
+            client.println("h1 { color: #00d4ff; margin-bottom: 5px; }");
+            client.println(".temp { font-size: 4rem; font-weight: bold; color: #ff4757; }");
+            client.println(".date { color: #888; letter-spacing: 1px; text-transform: uppercase; font-size: 0.9rem; }</style>");
+            client.println("<script>setInterval(() => { location.reload(); }, 10000);</script></head>");
+            client.println("<body><div class='card'><h1>Nicla Environment</h1>");
+            
+            // Display Data
+            client.print("<p class='date'>");
+            client.print(__DATE__); // Compile-time date as a placeholder
+            client.println("</p>");
+            client.print("<div class='temp'>");
+            client.print(temperature, 1); 
+            client.println("C</div>");
+            client.println("</div></body></html>");\
+
+            // The HTTP response ends with another blank line:
+            client.println();
+            // break out of the while loop:
+            break;
+          } else {      // if you got a newline, then clear currentLine:
+            currentLine = "";
+          }
+        } else if (c != '\r') {    // if you got anything else but a carriage return character,
+          currentLine += c;      // add it to the end of the currentLine
+        }
+      }
+    }
+    // close the connection:
+    client.stop();
+    Serial.println("client disconnected");
+  }
 }
