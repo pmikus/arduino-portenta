@@ -1,4 +1,4 @@
-name: Arduino CI
+name: Arduino Lint
 
 'on':
   push:
@@ -14,11 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the codebase.
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - name: Lint code.
-        uses: arduino/arduino-lint-action@v1
+        uses: arduino/arduino-lint-action@v2
         with:
           compliance: specification
-          library-manager: update
-          official: true
-          project-type: library
+          project-type: sketch
+          recursive: true
